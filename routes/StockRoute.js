@@ -1,5 +1,5 @@
 import express from 'express';
-import { getTickerHistoryData } from '../controllers/HoSEController.js';
+import { getTickerHistoryData } from '../controllers/StockController.js';
 
 const router = express.Router();
 
