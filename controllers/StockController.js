@@ -2,11 +2,10 @@ import puppeteer from 'puppeteer';
 
 /**
  * @route POST /api/hose/get_history
- * @param {ticker, start_date, end_date} req
- * @param {success, message, ? ticker_history_data} res
+ * @param { ticker, start_date, end_date } req
+ * @param { success, message, ? ticker_history_data, ? isHoSe } res
  */
 export const getTickerHistoryData = async (req, res) => {
-  // const browser = await puppeteer.launch({ headless: false, defaultViewport: false });
   const browser = await puppeteer.launch();
   try {
     console.log(req.body);
@@ -76,8 +75,9 @@ export const getTickerHistoryData = async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Done get stock history data successfully',
+      message: 'Get stock history data successfully',
       ticker_history_data,
+      isHoSe: tableId === 'GirdTable' ? false : true,
     });
   } catch (error) {
     await browser.close();
