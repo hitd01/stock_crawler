@@ -75,7 +75,7 @@ export const getTickerHistoryData = async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Done get stock history data successfully',
+      message: 'Get stock history data successfully',
       ticker_history_data,
       isHoSe: tableId === 'GirdTable' ? false : true,
     });
