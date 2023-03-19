@@ -6,7 +6,7 @@ import puppeteer from 'puppeteer';
  * @param {success, message, ? ticker_history_data} res
  */
 export const getTickerHistoryData = async (req, res) => {
-  const browser = await puppeteer.launch();
+  const browser = await puppeteer.launch({ headless: false, defaultViewport: false });
   try {
     console.log(req.body);
     const { ticker, start_date, end_date } = req.body;
@@ -19,14 +19,14 @@ export const getTickerHistoryData = async (req, res) => {
     }
 
     const page = await browser.newPage();
-    await page.goto(`https://s.cafef.vn/Lich-su-giao-dich-${ticker}-1.chn`, {
-      timeout: 60 * 1000 * 3,
-    });
+    await page.goto(`https://s.cafef.vn/Lich-su-giao-dich-${ticker}-1.chn`);
 
     // search
     await page.type('#ContentPlaceHolder1_ctl03_dpkTradeDate1_txtDatePicker', start_date);
     await page.type('#ContentPlaceHolder1_ctl03_dpkTradeDate2_txtDatePicker', end_date);
+    await page.waitForSelector('#ContentPlaceHolder1_ctl03_btSearch');
     await page.click('#ContentPlaceHolder1_ctl03_btSearch');
+    // await page.waitForNavigation({ timeout: 60 * 1000 * 1 });
 
     let ticker_history_data = [];
     let flag = true;
@@ -39,12 +39,15 @@ export const getTickerHistoryData = async (req, res) => {
         });
       });
       ticker_history_data = [...ticker_history_data, ...tickerData];
+      console.log(ticker_history_data);
+      // await new Promise((resolve) => setTimeout(resolve, 600));
 
       const nextPageIcon = await page.$eval(
         'table.CafeF_Paging > tbody > tr > td:last-child',
         (ele) => ele.textContent.trim()
       );
       if (nextPageIcon === '>') {
+        await page.waitForSelector('table.CafeF_Paging > tbody > tr > td:last-child > a');
         await page.click('table.CafeF_Paging > tbody > tr > td:last-child > a');
         await page.waitForSelector('#GirdTable2 > tbody > tr');
       } else {
