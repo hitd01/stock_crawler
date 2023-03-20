@@ -6,7 +6,8 @@ import puppeteer from 'puppeteer';
  * @param { success, message, ? ticker_history_data, ? isHoSe } res
  */
 export const getTickerHistoryData = async (req, res) => {
-  const browser = await puppeteer.launch({ headless: false, defaultViewport: false });
+  // const browser = await puppeteer.launch({ headless: false, defaultViewport: false });
+  const browser = await puppeteer.launch();
   try {
     console.log(req.body);
     const { ticker, start_date, end_date } = req.body;
