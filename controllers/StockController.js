@@ -37,6 +37,7 @@ export const getTickerHistoryData = async (req, res) => {
     } else if (tableNotHoSE) {
       tableId = 'GirdTable';
     }
+    console.log('tableId: ', tableId);
 
     if (tableId !== '') {
       const pagingCount = await page.$eval(
@@ -71,6 +72,14 @@ export const getTickerHistoryData = async (req, res) => {
               const tds = Array.from(tr.querySelectorAll('td'));
               const tdContents = tds.map((td) => td.textContent.trim());
               return [...tdContents.slice(0, 5), ...tdContents.slice(6)];
+            });
+          });
+        } else if (tableId === 'GirdTable2' && headerCount === 11) {
+          tickerData = await page.$$eval(`#${tableId} > tbody > tr`, (trs) => {
+            return trs.slice(2).map((tr) => {
+              const tds = Array.from(tr.querySelectorAll('td'));
+              const tdContents = tds.map((td) => td.textContent.trim());
+              return [...tdContents.slice(0, 3), ...tdContents.slice(4, 11)];
             });
           });
         } else {
