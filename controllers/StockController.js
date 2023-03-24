@@ -62,7 +62,7 @@ export const getTickerHistoryData = async (req, res) => {
           tickerData = await page.$$eval(`#${tableId} > tbody > tr`, (trs) => {
             return trs.slice(2).map((tr) => {
               const tds = Array.from(tr.querySelectorAll('td'));
-              const tdContents = tds.map((td) => td.textContent.trim());
+              const tdContents = tds.map((td) => td.textContent.trim().replaceAll(',', ''));
               return [...tdContents.slice(0, 4), ...tdContents.slice(5)];
             });
           });
@@ -70,7 +70,7 @@ export const getTickerHistoryData = async (req, res) => {
           tickerData = await page.$$eval(`#${tableId} > tbody > tr`, (trs) => {
             return trs.slice(2).map((tr) => {
               const tds = Array.from(tr.querySelectorAll('td'));
-              const tdContents = tds.map((td) => td.textContent.trim());
+              const tdContents = tds.map((td) => td.textContent.trim().replaceAll(',', ''));
               return [...tdContents.slice(0, 5), ...tdContents.slice(6)];
             });
           });
@@ -78,7 +78,7 @@ export const getTickerHistoryData = async (req, res) => {
           tickerData = await page.$$eval(`#${tableId} > tbody > tr`, (trs) => {
             return trs.slice(2).map((tr) => {
               const tds = Array.from(tr.querySelectorAll('td'));
-              const tdContents = tds.map((td) => td.textContent.trim());
+              const tdContents = tds.map((td) => td.textContent.trim().replaceAll(',', ''));
               return [...tdContents.slice(0, 3), ...tdContents.slice(4, 11)];
             });
           });
@@ -86,7 +86,7 @@ export const getTickerHistoryData = async (req, res) => {
           tickerData = await page.$$eval(`#${tableId} > tbody > tr`, (trs) => {
             return trs.slice(2).map((tr) => {
               const tds = Array.from(tr.querySelectorAll('td'));
-              const tdContents = tds.map((td) => td.textContent.trim());
+              const tdContents = tds.map((td) => td.textContent.trim().replaceAll(',', ''));
               return [...tdContents.slice(0, 4), ...tdContents.slice(5, 12)];
             });
           });
