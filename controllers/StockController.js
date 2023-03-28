@@ -27,7 +27,7 @@ export const getTickerHistoryData = async (req, res) => {
     await page.type('#ContentPlaceHolder1_ctl03_dpkTradeDate2_txtDatePicker', end_date);
     await page.waitForSelector('#ContentPlaceHolder1_ctl03_btSearch');
     await page.click('#ContentPlaceHolder1_ctl03_btSearch');
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, 650));
 
     let tableId = '';
     const tableHoSE = await page.$(`#GirdTable2`);
@@ -59,35 +59,75 @@ export const getTickerHistoryData = async (req, res) => {
       while (flag) {
         let tickerData = [];
         if (tableId === 'GirdTable' && headerCount === 10) {
+          // PVB
           tickerData = await page.$$eval(`#${tableId} > tbody > tr`, (trs) => {
             return trs.slice(2).map((tr) => {
               const tds = Array.from(tr.querySelectorAll('td'));
-              const tdContents = tds.map((td) => td.textContent.trim().replaceAll(',', ''));
-              return [...tdContents.slice(0, 4), ...tdContents.slice(5)];
+              const tdContents = tds.map((td) =>
+                td.textContent.trim().replaceAll(',', '').replaceAll('.', ',')
+              );
+              return [
+                tdContents[0],
+                tdContents[2],
+                tdContents[10],
+                tdContents[11],
+                tdContents[12],
+                `${Number(tdContents[5]) + Number(tdContents[7])}`,
+              ];
             });
           });
         } else if (tableId === 'GirdTable' && headerCount === 11) {
+          // PEQ
           tickerData = await page.$$eval(`#${tableId} > tbody > tr`, (trs) => {
             return trs.slice(2).map((tr) => {
               const tds = Array.from(tr.querySelectorAll('td'));
-              const tdContents = tds.map((td) => td.textContent.trim().replaceAll(',', ''));
-              return [...tdContents.slice(0, 5), ...tdContents.slice(6)];
+              const tdContents = tds.map((td) =>
+                td.textContent.trim().replaceAll(',', '').replaceAll('.', ',')
+              );
+              return [
+                tdContents[0],
+                tdContents[2],
+                tdContents[11],
+                tdContents[12],
+                tdContents[13],
+                `${Number(tdContents[6]) + Number(tdContents[8])}`,
+              ];
             });
           });
         } else if (tableId === 'GirdTable2' && headerCount === 11) {
+          // VNINDEX
           tickerData = await page.$$eval(`#${tableId} > tbody > tr`, (trs) => {
             return trs.slice(2).map((tr) => {
               const tds = Array.from(tr.querySelectorAll('td'));
-              const tdContents = tds.map((td) => td.textContent.trim().replaceAll(',', ''));
-              return [...tdContents.slice(0, 3), ...tdContents.slice(4, 11)];
+              const tdContents = tds.map((td) =>
+                td.textContent.trim().replaceAll(',', '').replaceAll('.', ',')
+              );
+              return [
+                tdContents[0],
+                tdContents[1],
+                tdContents[8],
+                tdContents[9],
+                tdContents[10],
+                `${Number(tdContents[4]) + Number(tdContents[6])}`,
+              ];
             });
           });
         } else {
+          // AAA
           tickerData = await page.$$eval(`#${tableId} > tbody > tr`, (trs) => {
             return trs.slice(2).map((tr) => {
               const tds = Array.from(tr.querySelectorAll('td'));
-              const tdContents = tds.map((td) => td.textContent.trim().replaceAll(',', ''));
-              return [...tdContents.slice(0, 4), ...tdContents.slice(5, 12)];
+              const tdContents = tds.map((td) =>
+                td.textContent.trim().replaceAll(',', '').replaceAll('.', ',')
+              );
+              return [
+                tdContents[0],
+                tdContents[2],
+                tdContents[9],
+                tdContents[10],
+                tdContents[11],
+                `${Number(tdContents[5]) + Number(tdContents[7])}`,
+              ];
             });
           });
         }
@@ -104,7 +144,7 @@ export const getTickerHistoryData = async (req, res) => {
           if (nextPageIcon === '>') {
             await page.waitForSelector('table.CafeF_Paging > tbody > tr > td:last-child > a');
             await page.click('table.CafeF_Paging > tbody > tr > td:last-child > a');
-            await new Promise((resolve) => setTimeout(resolve, 500));
+            await new Promise((resolve) => setTimeout(resolve, 650));
             await page.waitForSelector(`#${tableId} > tbody`);
           } else {
             flag = false;
