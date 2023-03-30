@@ -63,9 +63,7 @@ export const getTickerHistoryData = async (req, res) => {
           tickerData = await page.$$eval(`#${tableId} > tbody > tr`, (trs) => {
             return trs.slice(2).map((tr) => {
               const tds = Array.from(tr.querySelectorAll('td'));
-              const tdContents = tds.map((td) =>
-                td.textContent.trim().replaceAll(',', '').replaceAll('.', ',')
-              );
+              const tdContents = tds.map((td) => td.textContent.trim().replaceAll(',', ''));
               return [
                 tdContents[0],
                 tdContents[2],
@@ -81,9 +79,7 @@ export const getTickerHistoryData = async (req, res) => {
           tickerData = await page.$$eval(`#${tableId} > tbody > tr`, (trs) => {
             return trs.slice(2).map((tr) => {
               const tds = Array.from(tr.querySelectorAll('td'));
-              const tdContents = tds.map((td) =>
-                td.textContent.trim().replaceAll(',', '').replaceAll('.', ',')
-              );
+              const tdContents = tds.map((td) => td.textContent.trim().replaceAll(',', ''));
               return [
                 tdContents[0],
                 tdContents[2],
@@ -99,9 +95,7 @@ export const getTickerHistoryData = async (req, res) => {
           tickerData = await page.$$eval(`#${tableId} > tbody > tr`, (trs) => {
             return trs.slice(2).map((tr) => {
               const tds = Array.from(tr.querySelectorAll('td'));
-              const tdContents = tds.map((td) =>
-                td.textContent.trim().replaceAll(',', '').replaceAll('.', ',')
-              );
+              const tdContents = tds.map((td) => td.textContent.trim().replaceAll(',', ''));
               return [
                 tdContents[0],
                 tdContents[1],
@@ -117,9 +111,7 @@ export const getTickerHistoryData = async (req, res) => {
           tickerData = await page.$$eval(`#${tableId} > tbody > tr`, (trs) => {
             return trs.slice(2).map((tr) => {
               const tds = Array.from(tr.querySelectorAll('td'));
-              const tdContents = tds.map((td) =>
-                td.textContent.trim().replaceAll(',', '').replaceAll('.', ',')
-              );
+              const tdContents = tds.map((td) => td.textContent.trim().replaceAll(',', ''));
               return [
                 tdContents[0],
                 tdContents[2],
