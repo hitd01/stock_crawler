@@ -22,6 +22,21 @@ export const getTickerHistoryData = async (req, res) => {
     const page = await browser.newPage();
     await page.goto(`https://s.cafef.vn/Lich-su-giao-dich-${ticker}-1.chn`);
 
+    // check page error
+    const errorTitleEle = await page.$('div#mainDetail > div > h2');
+    if (errorTitleEle) {
+      const errorTitle = await page.$eval('div#mainDetail > div > h2', (ele) =>
+        ele.textContent.trim()
+      );
+      console.log(errorTitle);
+      if (errorTitle === 'Có lỗi xảy ra') {
+        return res.status(400).json({
+          success: false,
+          message: 'Page not found',
+        });
+      }
+    }
+
     // search
     await page.type('#ContentPlaceHolder1_ctl03_dpkTradeDate1_txtDatePicker', start_date);
     await page.type('#ContentPlaceHolder1_ctl03_dpkTradeDate2_txtDatePicker', end_date);
@@ -63,9 +78,7 @@ export const getTickerHistoryData = async (req, res) => {
           tickerData = await page.$$eval(`#${tableId} > tbody > tr`, (trs) => {
             return trs.slice(2).map((tr) => {
               const tds = Array.from(tr.querySelectorAll('td'));
-              const tdContents = tds.map((td) =>
-                td.textContent.trim().replaceAll(',', '').replaceAll('.', ',')
-              );
+              const tdContents = tds.map((td) => td.textContent.trim().replaceAll(',', ''));
               return [
                 tdContents[0],
                 tdContents[2],
@@ -81,9 +94,7 @@ export const getTickerHistoryData = async (req, res) => {
           tickerData = await page.$$eval(`#${tableId} > tbody > tr`, (trs) => {
             return trs.slice(2).map((tr) => {
               const tds = Array.from(tr.querySelectorAll('td'));
-              const tdContents = tds.map((td) =>
-                td.textContent.trim().replaceAll(',', '').replaceAll('.', ',')
-              );
+              const tdContents = tds.map((td) => td.textContent.trim().replaceAll(',', ''));
               return [
                 tdContents[0],
                 tdContents[2],
@@ -99,9 +110,7 @@ export const getTickerHistoryData = async (req, res) => {
           tickerData = await page.$$eval(`#${tableId} > tbody > tr`, (trs) => {
             return trs.slice(2).map((tr) => {
               const tds = Array.from(tr.querySelectorAll('td'));
-              const tdContents = tds.map((td) =>
-                td.textContent.trim().replaceAll(',', '').replaceAll('.', ',')
-              );
+              const tdContents = tds.map((td) => td.textContent.trim().replaceAll(',', ''));
               return [
                 tdContents[0],
                 tdContents[1],
@@ -117,9 +126,7 @@ export const getTickerHistoryData = async (req, res) => {
           tickerData = await page.$$eval(`#${tableId} > tbody > tr`, (trs) => {
             return trs.slice(2).map((tr) => {
               const tds = Array.from(tr.querySelectorAll('td'));
-              const tdContents = tds.map((td) =>
-                td.textContent.trim().replaceAll(',', '').replaceAll('.', ',')
-              );
+              const tdContents = tds.map((td) => td.textContent.trim().replaceAll(',', ''));
               return [
                 tdContents[0],
                 tdContents[2],
