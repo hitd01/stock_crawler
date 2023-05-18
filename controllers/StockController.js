@@ -6,13 +6,18 @@ import puppeteer from 'puppeteer';
  * @param { success, message, ? ticker_history_data, ? isHoSe } res
  */
 export const getTickerHistoryData = async (req, res) => {
-  // const browser = await puppeteer.launch({ headless: false, defaultViewport: false });
-  const browser = await puppeteer.launch();
+  // const browser = await puppeteer.launch({
+  //   headless: false,
+  //   defaultViewport: false,
+  //   timeout: 180000,
+  // });
+  const browser = await puppeteer.launch({ timeout: 180000 });
   try {
     console.log(req.body);
     const { ticker, start_date, end_date } = req.body;
 
     if (!ticker || !start_date || !end_date) {
+      await browser.close();
       return res.status(400).json({
         success: false,
         message: 'Missing ticker and/or start_date and/or end_date',
@@ -30,6 +35,7 @@ export const getTickerHistoryData = async (req, res) => {
       );
       console.log(errorTitle);
       if (errorTitle === 'Có lỗi xảy ra') {
+        await browser.close();
         return res.status(400).json({
           success: false,
           message: 'Page not found',
