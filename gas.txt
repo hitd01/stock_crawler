@@ -1,0 +1,1377 @@
+/**
+ * ======================= On open =======================
+ */
+function onOpen() {
+  createMenu();
+}
+
+function createMenu() {
+  SpreadsheetApp.getUi()
+    .createMenu('Chứng khoán')
+    .addItem('Lấy dữ liệu giao dịch sàn HoSE, HNX, UPCOM', 'crawlStockHistory')
+    .addItem('Cập nhật dữ liệu lịch sử giao dịch đã thu thập', 'crawlUpdateStockHistory')
+    .addItem(
+      'Lấy dữ liệu thống kê giao dịch của nhà đầu tư nước ngoài sàn HoSE',
+      'crawlHoSEForeginInvestment'
+    )
+    .addItem('Dừng chạy chương trình', 'stopProgram')
+    .addToUi();
+}
+
+/**
+ * ======================= Find value =======================
+ */
+function findValue(title) {
+  const as = SpreadsheetApp.getActiveSpreadsheet();
+  const systemSheet = as.getSheetByName('System');
+
+  const lastColumn = systemSheet.getLastColumn();
+
+  for (let i = 1; i <= lastColumn; i++) {
+    if (systemSheet.getRange(1, i).getValue() === title) {
+      const columnName = systemSheet.getRange(1, i).getA1Notation().replace(/\d+/g, '');
+      console.log(`${title}: `, { columnName, index: i });
+      return { columnName, index: i };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * ======================= Check title column =======================
+ */
+function checkTitleColumn() {
+  const as = SpreadsheetApp.getActiveSpreadsheet();
+  const logSheet = as.getSheetByName('Log');
+
+  const tickerToCrawlColumn = findValue('Ticker để crawl');
+  const errorTickerColumn = findValue('Ticker lỗi');
+  const startDateColumn = findValue('Ngày bắt đầu');
+  const endDateColumn = findValue('Ngày kết thúc');
+  const emailColumn = findValue('Email thông báo');
+  const messageColumn = findValue('Message');
+  const crawlProcessColumn = findValue('Crawling Stock History Progress');
+  const crawlForeginProcessColumn = findValue('Crawling HoSE Foregin Progress');
+  const crawlForeginTypeColumn = findValue('Crawl dữ liệu khối ngoại trên HoSE');
+  const autoTimeCrawlForeginColumn = findValue('Thời gian lấy dữ liệu khối ngoại HoSE tự động');
+  if (
+    !tickerToCrawlColumn ||
+    !errorTickerColumn ||
+    !startDateColumn ||
+    !endDateColumn ||
+    !emailColumn ||
+    !messageColumn ||
+    !crawlProcessColumn ||
+    !crawlForeginProcessColumn ||
+    !crawlForeginTypeColumn ||
+    !autoTimeCrawlForeginColumn
+  ) {
+    logSheet.appendRow([
+      new Date().toLocaleString(),
+      'check title column error',
+      'missing title column',
+    ]);
+    Browser.msgBox(
+      'Không tồn tại 1 trong các tiêu đề: Ticker để crawl, Ticker lỗi, Ngày bắt đầu, Ngày kết thúc, Email thông báo, Message, Crawling Stock History Progress, Crawling HoSE Foregin Progress, Crawl dữ liệu khối ngoại trên HoSE, Thời gian lấy dữ liệu khối ngoại HoSE tự động'
+    );
+    return null;
+  }
+  return {
+    tickerToCrawlColumn,
+    errorTickerColumn,
+    startDateColumn,
+    endDateColumn,
+    emailColumn,
+    messageColumn,
+    crawlProcessColumn,
+    crawlForeginProcessColumn,
+    crawlForeginTypeColumn,
+    autoTimeCrawlForeginColumn,
+  };
+}
+
+/**
+ * ======================= Crawl stock history data =======================
+ */
+function crawlStockHistory() {
+  try {
+    const as = SpreadsheetApp.getActiveSpreadsheet();
+    let userProperties = PropertiesService.getUserProperties();
+    userProperties.setProperty('GASCBL_crawlStockHistory_START_ITERATION', new Date());
+    userProperties.setProperty('START_CRAWL_STOCK_HISTORY_DATA', new Date().toLocaleString());
+
+    const logSheet = as.getSheetByName('Log');
+    logSheet.getRange(2, 1, logSheet.getLastRow(), 3).clear();
+    logSheet.appendRow([new Date().toLocaleString(), 'start crawl', 'starting']);
+
+    const systemSheet = as.getSheetByName('System');
+
+    const titleInfo = checkTitleColumn();
+    if (titleInfo) {
+      let isRunning = userProperties.getProperty('IS_RUNNING');
+      console.log('isRunning: ', isRunning);
+
+      logSheet.appendRow([
+        new Date().toLocaleString(),
+        'check if have a script is running',
+        'checking',
+      ]);
+      if (isRunning === 'true') {
+        logSheet.appendRow([
+          new Date().toLocaleString(),
+          'check if have a script is running',
+          'have a script is running',
+        ]);
+        Browser.msgBox('Chương trình đang chạy. Vui lòng chờ!');
+        return;
+      }
+      logSheet.appendRow([
+        new Date().toLocaleString(),
+        'check if have a script is running',
+        "don't have other script is running",
+      ]);
+
+      let tickersInput = systemSheet
+        .getRange(
+          2,
+          titleInfo.tickerToCrawlColumn.index,
+          systemSheet
+            .getRange(
+              `${titleInfo.tickerToCrawlColumn.columnName}:${titleInfo.tickerToCrawlColumn.columnName}`
+            )
+            .getLastRow() - 1
+        )
+        .getValues();
+      tickersInput = tickersInput.filter((ticker) => ticker[0] !== '').map((ticker) => ticker[0]);
+
+      let startDateValue = systemSheet.getRange(2, titleInfo.startDateColumn.index).getValue();
+      let endDateValue = systemSheet.getRange(2, titleInfo.endDateColumn.index).getValue();
+      let emailSendMes = systemSheet.getRange(2, titleInfo.emailColumn.index).getValue();
+      let mesSend = systemSheet.getRange(2, titleInfo.messageColumn.index).getValue();
+
+      // validate date
+      logSheet.appendRow([new Date().toLocaleString(), 'check input data', 'checking']);
+      if (tickersInput?.length < 1) {
+        logSheet.appendRow([
+          new Date().toLocaleString(),
+          'check input data',
+          'invalid tickers input',
+        ]);
+        Browser.msgBox('Không có mã chứng khoán!');
+        return;
+      }
+      if (!isDate(startDateValue)) {
+        if (!validateDate(startDateValue)) {
+          logSheet.appendRow([
+            new Date().toLocaleString(),
+            'check input data',
+            'wrong start date format',
+          ]);
+          Browser.msgBox('Dữ liệu ngày bắt đầu chưa đúng định dạng');
+          return;
+        }
+      }
+      if (!isDate(endDateValue)) {
+        if (!validateDate(endDateValue)) {
+          logSheet.appendRow([
+            new Date().toLocaleString(),
+            'check input data',
+            'wrong end date format',
+          ]);
+          Browser.msgBox('Dữ liệu ngày kết thúc chưa đúng định dạng');
+          return;
+        }
+      }
+      let startDateTime = new Date(startDateValue);
+      let endDateTime = new Date(endDateValue);
+      if (
+        parseInt(startDateTime.toISOString().slice(0, 10).replaceAll('-', '')) >
+        parseInt(endDateTime.toISOString().slice(0, 10).replaceAll('-', ''))
+      ) {
+        logSheet.appendRow([
+          new Date().toLocaleString(),
+          'check input data',
+          'start date is greater than end date',
+        ]);
+        Browser.msgBox('Ngày bắt đầu lớn hơn ngày kết thúc!');
+        return;
+      }
+      if (!validateEmail(emailSendMes)) {
+        logSheet.appendRow([new Date().toLocaleString(), 'check input data', 'invalid email']);
+        Browser.msgBox('Email không hợp lệ!');
+        return;
+      }
+      if (mesSend?.trim() === '') {
+        logSheet.appendRow([
+          new Date().toLocaleString(),
+          'check input data',
+          'missing notification message',
+        ]);
+        Browser.msgBox('Vui lòng nhập Message thông báo!');
+        return;
+      }
+      logSheet.appendRow([new Date().toLocaleString(), 'check input data', 'done']);
+
+      var ui = SpreadsheetApp.getUi();
+      var result = ui.alert('THÔNG BÁO', 'Xác nhận thực hiện lấy dữ liệu?', ui.ButtonSet.YES_NO);
+
+      if (result == ui.Button.YES) {
+        userProperties.setProperty('IS_RUNNING', 'true');
+        systemSheet.getRange(2, titleInfo.crawlProcessColumn.index).setValue(`0%`);
+        systemSheet
+          .getRange(
+            2,
+            titleInfo.errorTickerColumn.index,
+            systemSheet
+              .getRange(
+                `${titleInfo.errorTickerColumn.columnName}:${titleInfo.errorTickerColumn.columnName}`
+              )
+              .getLastRow(),
+            1
+          )
+          .clear();
+
+        let startDate = `${startDateTime.getFullYear()}-${
+          startDateTime.getMonth() + 1 < 10
+            ? `0${startDateTime.getMonth() + 1}`
+            : startDateTime.getMonth() + 1
+        }-${
+          startDateTime.getDate() < 10 ? `0${startDateTime.getDate()}` : startDateTime.getDate()
+        }`;
+        let endDate = `${endDateTime.getFullYear()}-${
+          endDateTime.getMonth() + 1 < 10
+            ? `0${endDateTime.getMonth() + 1}`
+            : endDateTime.getMonth() + 1
+        }-${endDateTime.getDate() < 10 ? `0${endDateTime.getDate()}` : endDateTime.getDate()}`;
+        console.log('startDate & endDate: ', startDate, endDate);
+
+        userProperties.setProperty('START_DATE', startDate);
+        userProperties.setProperty('END_DATE', endDate);
+
+        userProperties.setProperty('EMAIL_SEND', emailSendMes);
+        userProperties.setProperty('MESSAGE_SEND', mesSend);
+
+        userProperties.setProperty('TICKERS_INPUT', JSON.stringify(tickersInput));
+        userProperties.setProperty('ERROR_TICKERS', JSON.stringify([]));
+        userProperties.setProperty('SHEET_COUNT', 0);
+
+        userProperties.setProperty('IS_STOP_PROGRAM', 'false');
+
+        deleteOldData(true);
+      } else {
+        userProperties.setProperty('IS_RUNNING', 'false');
+        logSheet.appendRow([new Date().toLocaleString(), 'cancel crawl', 'done']);
+      }
+    }
+  } catch (error) {
+    console.log(error.message);
+    let logSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Log');
+    logSheet.appendRow([new Date().toLocaleString(), 'start crawl error', error.message]);
+  }
+}
+
+function deleteOldData(firstRun) {
+  try {
+    startOrResumeContinousExecutionInstance('deleteOldData');
+    const as = SpreadsheetApp.getActiveSpreadsheet();
+    const logSheet = as.getSheetByName('Log');
+
+    logSheet.appendRow([new Date().toLocaleString(), 'delete old data', 'deleting']);
+    var sheets = as.getSheets();
+    for (let i = 0; i < sheets.length; i++) {
+      if (firstRun === true) {
+        if (isTimeRunningOut('crawlStockHistory')) {
+          return;
+        }
+      } else {
+        if (isTimeRunningOut('deleteOldData')) {
+          return;
+        }
+      }
+      var sheetName = sheets[i].getName();
+      if (/^\d+$/.test(sheetName)) {
+        as.deleteSheet(sheets[i]);
+      }
+      if (i === sheets.length - 1) {
+        logSheet.appendRow([new Date().toLocaleString(), 'delete old data', 'done']);
+        endContinuousExecutionInstance('deleteOldData');
+        if (firstRun === true) {
+          getStockHistoryData(true);
+        } else {
+          getStockHistoryData();
+        }
+      }
+    }
+  } catch (error) {
+    console.log(error.message);
+    let logSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Log');
+    logSheet.appendRow([new Date().toLocaleString(), 'delete old data error', error.message]);
+  }
+}
+
+function getStockHistoryData(firstRun) {
+  try {
+    startOrResumeContinousExecutionInstance('getStockHistoryData');
+    let as = SpreadsheetApp.getActiveSpreadsheet();
+    let userProperties = PropertiesService.getUserProperties();
+
+    let logSheet = as.getSheetByName('Log');
+    let systemSheet = as.getSheetByName('System');
+    let templateSheet = as.getSheetByName('Template');
+
+    logSheet.appendRow([new Date().toLocaleString(), 'get stock history data', 'getting']);
+
+    const titleInfo = checkTitleColumn();
+    if (titleInfo) {
+      if (!getBatchKey('getStockHistoryData')) {
+        setBatchKey('getStockHistoryData', 0);
+      }
+
+      let counter = Number(getBatchKey('getStockHistoryData'));
+      console.log('counter: ', counter);
+      let startDate = userProperties.getProperty('START_DATE');
+      let endDate = userProperties.getProperty('END_DATE');
+      console.log('startDate & endDate: ', startDate, endDate);
+
+      const tickersInput = JSON.parse(userProperties.getProperty('TICKERS_INPUT'));
+      console.log('tickersInput: ', tickersInput);
+      for (let i = 0 + counter; i < tickersInput?.length; i++) {
+        let sheetCount = Number(userProperties.getProperty('SHEET_COUNT'));
+        console.log('sheetCount: ', sheetCount);
+        let tryCount = 2;
+        while (tryCount > 0) {
+          let historyData = [];
+          // VNINDEX, VNDIAMOND, VNFINSELECT, VNFINLEAD, VN30, VNXALL, VNX50, VNALL, VNMID, VNSML, VN100, VNSI, HNX30, HNX, UPCOM
+          if (
+            tickersInput[i] === 'VNINDEX' ||
+            tickersInput[i] === 'VNDIAMOND' ||
+            tickersInput[i] === 'VNFINSELECT' ||
+            tickersInput[i] === 'VNFINLEAD' ||
+            tickersInput[i] === 'VN30' ||
+            tickersInput[i] === 'VNXALL' ||
+            tickersInput[i] === 'VNX50' ||
+            tickersInput[i] === 'VNALL' ||
+            tickersInput[i] === 'VNMID' ||
+            tickersInput[i] === 'VNSML' ||
+            tickersInput[i] === 'VN100' ||
+            tickersInput[i] === 'VNSI' ||
+            tickersInput[i] === 'HNX30' ||
+            tickersInput[i] === 'HNX' ||
+            tickersInput[i] === 'UPCOM'
+          ) {
+            historyData = fetchVNMarketHistory(tickersInput[i], startDate, endDate);
+          } else {
+            historyData = fetchStockHistory(tickersInput[i], startDate, endDate);
+          }
+
+          if (firstRun === true) {
+            if (isTimeRunningOut('crawlStockHistory')) {
+              setBatchKey('getStockHistoryData', i);
+              console.log('setBatchKey timeout: ', i);
+              if (as.getSheetByName(`${sheetCount + 1}`)) {
+                userProperties.setProperty('SHEET_COUNT', sheetCount);
+                as.deleteSheet(as.getSheetByName(`${sheetCount + 1}`));
+              }
+              return;
+            }
+          } else {
+            if (isTimeRunningOut('getStockHistoryData')) {
+              setBatchKey('getStockHistoryData', i);
+              console.log('setBatchKey timeout: ', i);
+              if (as.getSheetByName(`${sheetCount + 1}`)) {
+                userProperties.setProperty('SHEET_COUNT', sheetCount);
+                as.deleteSheet(as.getSheetByName(`${sheetCount + 1}`));
+              }
+              return;
+            }
+          }
+          if (Array.isArray(historyData) && historyData?.length > 0) {
+            tryCount = 0;
+            if (!as.getSheetByName(`${sheetCount + 1}`)) {
+              let lastSheetIndex = as.getSheets().length;
+              as.insertSheet(`${sheetCount + 1}`, lastSheetIndex, { template: templateSheet });
+              as.getSheetByName(`${sheetCount + 1}`)
+                .getRange('A1')
+                .setValue(tickersInput[i]);
+              as.getSheetByName(`${sheetCount + 1}`)
+                .getRange('B1')
+                .setValue('https://dstock.vndirect.com.vn/');
+              userProperties.setProperty('SHEET_COUNT', sheetCount + 1);
+            }
+            let currentSheet = as.getSheetByName(`${sheetCount + 1}`);
+            currentSheet
+              .getRange(3, 1, historyData?.length, historyData[0]?.length)
+              .setValues(historyData);
+          } else {
+            --tryCount;
+            if (tryCount === 0) {
+              let errorTickers = JSON.parse(userProperties.getProperty('ERROR_TICKERS'));
+              errorTickers?.push([tickersInput[i]]);
+              userProperties.setProperty('ERROR_TICKERS', JSON.stringify(errorTickers));
+            }
+          }
+        }
+
+        setBatchKey('getStockHistoryData', i);
+        console.log('setBatchKey: ', i);
+
+        let errorTickersLength = JSON.parse(userProperties.getProperty('ERROR_TICKERS'))?.length;
+        systemSheet
+          .getRange(2, titleInfo.crawlProcessColumn.index)
+          .setValue(
+            `${(
+              ((i + 1) / tickersInput?.length) * 100 -
+              (errorTickersLength / tickersInput?.length) * 100
+            ).toFixed(2)}%`
+          );
+
+        if (i === tickersInput?.length - 1) {
+          logSheet.appendRow([new Date().toLocaleString(), 'get stock history data', 'done']);
+
+          const errorTickers = JSON.parse(userProperties.getProperty('ERROR_TICKERS'));
+          if (errorTickers?.length > 0) {
+            systemSheet
+              .getRange(2, titleInfo.errorTickerColumn.index, errorTickers?.length, 1)
+              .setValues(errorTickers);
+          }
+
+          endContinuousExecutionInstance('getStockHistoryData');
+          endCrawlStockHistoryData();
+        }
+      }
+    }
+  } catch (error) {
+    console.log(error.message);
+    let logSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Log');
+    logSheet.appendRow([
+      new Date().toLocaleString(),
+      'get stock history data error',
+      error.message,
+    ]);
+  }
+}
+
+function fetchVNMarketHistory(vnMarket, startDate, endDate) {
+  try {
+    console.log(`fetchVNMarketHistory: ${vnMarket} - ${startDate} - ${endDate}`);
+    const url = `https://finfo-api.vndirect.com.vn/v4/vnmarket_prices?sort=date&q=code:${vnMarket}~date:gte:${startDate}~date:lte:${endDate}&size=9999&page=1`;
+    const options = {
+      method: 'GET',
+    };
+
+    const response = UrlFetchApp.fetch(url, options);
+    console.log(
+      'fetchVNMarketHistory response code: ',
+      response.getResponseCode(),
+      ' -- vnmarket code: ',
+      vnMarket
+    );
+
+    const locale = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetLocale();
+    let result = [];
+    if (response.getResponseCode() === 200) {
+      let data = JSON.parse(response.getContentText())?.data;
+      if (Array.isArray(data)) {
+        result = data.map((item) => {
+          if (locale === 'vi_VN') {
+            return [
+              item?.date,
+              `${item?.close}`.replaceAll('.', ','),
+              `${item?.open}`.replaceAll('.', ','),
+              `${item?.high}`.replaceAll('.', ','),
+              `${item?.low}`.replaceAll('.', ','),
+              `${item?.nmVolume}`.replaceAll('.', ','),
+            ];
+          } else {
+            return [
+              item?.date,
+              `${item?.close}`,
+              `${item?.open}`,
+              `${item?.high}`,
+              `${item?.low}`,
+              `${item?.nmVolume}`,
+            ];
+          }
+        });
+      }
+    }
+    return result;
+  } catch (error) {
+    console.log('fetchVNMarketHistory error: ', error.message);
+    console.log(`${vnMarket} - ${startDate} - ${endDate}`);
+    return null;
+  }
+}
+
+function fetchStockHistory(stock, startDate, endDate) {
+  try {
+    console.log(`fetchStockHistory: ${stock} - ${startDate} - ${endDate}`);
+    const url = `https://finfo-api.vndirect.com.vn/v4/stock_prices?sort=date&q=code:${stock}~date:gte:${startDate}~date:lte:${endDate}&size=9999&page=1`;
+    const options = {
+      method: 'GET',
+    };
+
+    const response = UrlFetchApp.fetch(url, options);
+    console.log(
+      'fetchStockHistory response code: ',
+      response.getResponseCode(),
+      ' -- stock: ',
+      stock
+    );
+
+    const locale = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetLocale();
+    let result = [];
+    if (response.getResponseCode() === 200) {
+      let data = JSON.parse(response.getContentText())?.data;
+      if (Array.isArray(data)) {
+        result = data.map((item) => {
+          if (locale === 'vi_VN') {
+            return [
+              item?.date,
+              `${item?.close}`.replaceAll('.', ','),
+              `${item?.open}`.replaceAll('.', ','),
+              `${item?.high}`.replaceAll('.', ','),
+              `${item?.low}`.replaceAll('.', ','),
+              `${item?.nmVolume}`.replaceAll('.', ','),
+            ];
+          } else {
+            return [
+              item?.date,
+              `${item?.close}`,
+              `${item?.open}`,
+              `${item?.high}`,
+              `${item?.low}`,
+              `${item?.nmVolume}`,
+            ];
+          }
+        });
+      }
+    }
+    return result;
+  } catch (error) {
+    console.log('fetchStockHistory error: ', error.message);
+    console.log(`${stock} - ${startDate} - ${endDate}`);
+    return null;
+  }
+}
+
+function endCrawlStockHistoryData() {
+  try {
+    console.log('endCrawlStockHistoryData');
+    var userProperties = PropertiesService.getUserProperties();
+
+    var isStopProgram = userProperties.getProperty('IS_STOP_PROGRAM');
+    if (!isStopProgram || isStopProgram === 'false') {
+      var end = new Date().toLocaleString();
+      var start = userProperties.getProperty('START_CRAWL_STOCK_HISTORY_DATA');
+      var emailRecipient = userProperties.getProperty('EMAIL_SEND');
+      var emailTitle = userProperties.getProperty('MESSAGE_SEND');
+      var body = 'Started: ' + start + '<br>' + 'Ended: ' + end;
+      MailApp.sendEmail(emailRecipient, emailTitle, '', { htmlBody: body });
+    }
+
+    userProperties.setProperty('IS_RUNNING', 'false');
+  } catch (error) {
+    console.log(error.message);
+    const logSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Log');
+    logSheet.appendRow([
+      new Date().toLocaleString(),
+      'endCrawlStockHistoryData error',
+      error.message,
+    ]);
+  }
+}
+
+/**
+ * ======================= Crawl update stock history data =======================
+ */
+function crawlUpdateStockHistory() {
+  try {
+    startOrResumeContinousExecutionInstance('crawlUpdateStockHistory');
+    let as = SpreadsheetApp.getActiveSpreadsheet();
+    let userProperties = PropertiesService.getUserProperties();
+    userProperties.setProperty('GASCBL_update_START_ITERATION', new Date());
+
+    let logSheet = as.getSheetByName('Log');
+    let systemSheet = as.getSheetByName('System');
+
+    logSheet.appendRow([new Date().toLocaleString(), 'update stock history data', 'updating']);
+
+    const titleInfo = checkTitleColumn();
+    if (titleInfo) {
+      let emailSendMes = systemSheet.getRange(2, titleInfo.emailColumn.index).getValue();
+      let mesSend = systemSheet.getRange(2, titleInfo.messageColumn.index).getValue();
+
+      if (!validateEmail(emailSendMes)) {
+        logSheet.appendRow([new Date().toLocaleString(), 'check input data', 'invalid email']);
+        Browser.msgBox('Email không hợp lệ!');
+        return;
+      }
+      if (mesSend?.trim() === '') {
+        logSheet.appendRow([
+          new Date().toLocaleString(),
+          'check input data',
+          'missing notification message',
+        ]);
+        Browser.msgBox('Vui lòng nhập Message thông báo!');
+        return;
+      }
+      userProperties.setProperty('EMAIL_SEND', emailSendMes);
+      userProperties.setProperty('MESSAGE_SEND', mesSend);
+
+      let startDate = userProperties.getProperty('END_DATE');
+      let now = new Date();
+      let endDate = `${now.getFullYear()}-${
+        now.getMonth() + 1 < 10 ? `0${now.getMonth() + 1}` : now.getMonth() + 1
+      }-${now.getDate() < 10 ? `0${now.getDate()}` : now.getDate()}`;
+      console.log('date update: ', startDate, endDate);
+
+      const sheetCount = Number(userProperties.getProperty('SHEET_COUNT'));
+      if (!getBatchKey('crawlUpdateStockHistory')) {
+        setBatchKey('crawlUpdateStockHistory', 1);
+      }
+      let counter = Number(getBatchKey('crawlUpdateStockHistory'));
+      for (let i = 0 + counter; i <= sheetCount; i++) {
+        let currentSheet = as.getSheetByName(`${i}`);
+        let lastDateCellValue = currentSheet.getRange('A3').getValue();
+        if (isDate(lastDateCellValue)) {
+          lastDateCellValue = `${lastDateCellValue.getFullYear()}-${
+            lastDateCellValue.getMonth() + 1 < 10
+              ? `0${lastDateCellValue.getMonth() + 1}`
+              : lastDateCellValue.getMonth() + 1
+          }-${
+            lastDateCellValue.getDate() < 10
+              ? `0${lastDateCellValue.getDate()}`
+              : lastDateCellValue.getDate()
+          }`;
+        }
+
+        const ticker = currentSheet.getRange('A1').getValue();
+        let tryCount = 2;
+        while (tryCount > 0) {
+          let historyData = [];
+          // VNINDEX, VNDIAMOND, VNFINSELECT, VNFINLEAD, VN30, VNXALL, VNX50, VNALL, VNMID, VNSML, VN100, VNSI, HNX30, HNX, UPCOM
+          if (
+            ticker === 'VNINDEX' ||
+            ticker === 'VNDIAMOND' ||
+            ticker === 'VNFINSELECT' ||
+            ticker === 'VNFINLEAD' ||
+            ticker === 'VN30' ||
+            ticker === 'VNXALL' ||
+            ticker === 'VNX50' ||
+            ticker === 'VNALL' ||
+            ticker === 'VNMID' ||
+            ticker === 'VNSML' ||
+            ticker === 'VN100' ||
+            ticker === 'VNSI' ||
+            ticker === 'HNX30' ||
+            ticker === 'HNX' ||
+            ticker === 'UPCOM'
+          ) {
+            historyData = fetchVNMarketHistory(ticker, startDate, endDate);
+          } else {
+            historyData = fetchStockHistory(ticker, startDate, endDate);
+          }
+
+          if (isTimeRunningOut('crawlUpdateStockHistory')) {
+            setBatchKey('crawlUpdateStockHistory', i);
+            console.log('setBatchKey timeout: ', i);
+            return;
+          }
+          if (Array.isArray(historyData) && historyData?.length > 0) {
+            tryCount = 0;
+            if (
+              Number(historyData[historyData.length - 1][0]?.replaceAll('-', '')) >
+              Number(lastDateCellValue?.replaceAll('-', ''))
+            ) {
+              currentSheet.insertRowsBefore(3, historyData?.length);
+            } else if (
+              Number(historyData[historyData.length - 1][0]?.replaceAll('-', '')) ===
+              Number(lastDateCellValue?.replaceAll('-', ''))
+            ) {
+              currentSheet.insertRowsBefore(4, historyData?.length - 1);
+            }
+            currentSheet
+              .getRange(3, 1, historyData?.length, historyData[0]?.length)
+              .setValues(historyData);
+          } else {
+            --tryCount;
+          }
+        }
+        setBatchKey('crawlUpdateStockHistory', i);
+
+        systemSheet
+          .getRange(2, titleInfo.crawlProcessColumn.index)
+          .setValue(`${((i / sheetCount) * 100).toFixed(2)}%`);
+        if (i === sheetCount) {
+          logSheet.appendRow([new Date().toLocaleString(), 'update stock history data', 'done']);
+
+          endContinuousExecutionInstance('crawlUpdateStockHistory');
+          endUpdateStockHistoryData();
+        }
+      }
+    }
+  } catch (error) {
+    console.log(error.message);
+    const logSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Log');
+    logSheet.appendRow([new Date().toLocaleString(), 'autoCrawlStockHistory error', error.message]);
+  }
+}
+
+function endUpdateStockHistoryData() {
+  try {
+    console.log('endUpdateStockHistoryData');
+    var userProperties = PropertiesService.getUserProperties();
+
+    var end = new Date().toLocaleString();
+    var start = userProperties.getProperty('GASCBL_update_START_ITERATION');
+    var emailRecipient = userProperties.getProperty('EMAIL_SEND');
+    var emailTitle = userProperties.getProperty('MESSAGE_SEND');
+    var body = 'Started: ' + start + '<br>' + 'Ended: ' + end;
+    MailApp.sendEmail(emailRecipient, emailTitle, '', { htmlBody: body });
+  } catch (error) {
+    console.log(error.message);
+    const logSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Log');
+    logSheet.appendRow([
+      new Date().toLocaleString(),
+      'endUpdateStockHistoryData error',
+      error.message,
+    ]);
+  }
+}
+
+/**
+ * ======================= Crawl HoSE foregin investment history data =======================
+ */
+function crawlHoSEForeginInvestment() {
+  try {
+    makeAutoFetchHoSEForeginTrigger();
+    const as = SpreadsheetApp.getActiveSpreadsheet();
+    let userProperties = PropertiesService.getUserProperties();
+
+    const systemSheet = as.getSheetByName('System');
+    const logSheet = as.getSheetByName('Log');
+    logSheet.appendRow([new Date().toLocaleString(), 'start crawl HoSE Foregin', 'starting']);
+
+    const titleInfo = checkTitleColumn();
+    if (titleInfo) {
+      const hoSEForeginSheet = as.getSheetByName('HoSE.ForeignInvestment');
+
+      let isRunning = userProperties.getProperty('IS_RUNNING_FOREGIN');
+      console.log(isRunning);
+
+      logSheet.appendRow([
+        new Date().toLocaleString(),
+        'check if have a script is running',
+        'checking',
+      ]);
+      if (isRunning === 'true') {
+        logSheet.appendRow([
+          new Date().toLocaleString(),
+          'check if have a script is running',
+          'have a script is running',
+        ]);
+        Browser.msgBox('Chương trình đang chạy. Vui lòng chờ!');
+        return;
+      }
+      logSheet.appendRow([
+        new Date().toLocaleString(),
+        'check if have a script is running',
+        "don't have other script is running",
+      ]);
+
+      let startDateValue = systemSheet.getRange(2, titleInfo.startDateColumn.index).getValue();
+      let endDateValue = systemSheet.getRange(2, titleInfo.endDateColumn.index).getValue();
+      let optionValue = systemSheet.getRange(2, titleInfo.crawlForeginTypeColumn.index).getValue();
+
+      // validate date
+      logSheet.appendRow([new Date().toLocaleString(), 'check input data', 'checking']);
+      if (!isDate(startDateValue)) {
+        if (!validateDate(startDateValue)) {
+          logSheet.appendRow([
+            new Date().toLocaleString(),
+            'check input data',
+            'wrong start date format',
+          ]);
+          Browser.msgBox('Dữ liệu ngày bắt đầu chưa đúng định dạng');
+          return;
+        }
+      }
+      if (!isDate(endDateValue)) {
+        if (!validateDate(endDateValue)) {
+          logSheet.appendRow([
+            new Date().toLocaleString(),
+            'check input data',
+            'wrong end date format',
+          ]);
+          Browser.msgBox('Dữ liệu ngày kết thúc chưa đúng định dạng');
+          return;
+        }
+      }
+      if (!optionValue) {
+        logSheet.appendRow([
+          new Date().toLocaleString(),
+          'check input data',
+          'missing option value',
+        ]);
+        Browser.msgBox('Vui lòng chọn loại dữ liệu khối ngoại!');
+        return;
+      }
+      logSheet.appendRow([new Date().toLocaleString(), 'check input data', 'done']);
+
+      var ui = SpreadsheetApp.getUi();
+      var result = ui.alert(
+        'THÔNG BÁO',
+        'Xác nhận thực hiện lấy dữ liệu thống kê giao dịch của nhà đầu tư nước ngoài?',
+        ui.ButtonSet.YES_NO
+      );
+
+      if (result == ui.Button.YES) {
+        systemSheet.getRange(2, titleInfo.crawlForeginProcessColumn.index).setValue(`0%`);
+        userProperties.setProperty('IS_RUNNING_FOREGIN', 'true');
+
+        let startDate = '';
+        let endDate = '';
+
+        if (isDate(startDateValue)) {
+          startDate = new Date(startDateValue?.setDate(startDateValue?.getDate() + 1))
+            .toISOString()
+            .slice(0, 10);
+        } else {
+          startDate = new Date(
+            new Date(startDateValue).setDate(new Date(startDateValue).getDate() + 1)
+          )
+            .toISOString()
+            .slice(0, 10);
+        }
+
+        if (isDate(endDateValue)) {
+          endDate = new Date(endDateValue?.setDate(endDateValue?.getDate() + 1))
+            .toISOString()
+            .slice(0, 10);
+        } else {
+          endDate = new Date(new Date(endDateValue).setDate(new Date(endDateValue).getDate() + 1))
+            .toISOString()
+            .slice(0, 10);
+        }
+
+        let startDateTime = new Date(startDate);
+        let endDateTime = new Date(endDate);
+        let flagDate = true;
+        let dates = [];
+        while (flagDate) {
+          if (
+            parseInt(startDateTime.toISOString().slice(0, 10).replaceAll('-', '')) >
+            parseInt(endDateTime.toISOString().slice(0, 10).replaceAll('-', ''))
+          ) {
+            flagDate = false;
+          } else {
+            const dateDay = endDateTime.getDate();
+            const dateMonth = endDateTime.getMonth() + 1;
+            const dateYear = endDateTime.getFullYear();
+            endDateTime = new Date(endDateTime.setDate(endDateTime.getDate() - 1));
+            dates.push(
+              `${dateDay < 10 ? `0${dateDay}` : dateDay}.${
+                dateMonth < 10 ? `0${dateMonth}` : dateMonth
+              }.${dateYear}`
+            );
+          }
+        }
+        console.log('dates: ', dates);
+        userProperties.setProperty('FOREGIN_DATES', JSON.stringify(dates));
+
+        // Cổ phiếu Trái phiếu Chứng chỉ quỹ ETF CW
+        if (optionValue === 'Tất cả') {
+          userProperties.setProperty('FOREGIN_OPTION_VALUE', '0');
+        } else if (optionValue === 'Cổ phiếu') {
+          userProperties.setProperty('FOREGIN_OPTION_VALUE', '2');
+        } else if (optionValue === 'Trái phiếu') {
+          userProperties.setProperty('FOREGIN_OPTION_VALUE', '1');
+        } else if (optionValue === 'Chứng chỉ quỹ') {
+          userProperties.setProperty('FOREGIN_OPTION_VALUE', '3');
+        } else if (optionValue === 'ETF') {
+          userProperties.setProperty('FOREGIN_OPTION_VALUE', '5');
+        } else if (optionValue === 'CW') {
+          userProperties.setProperty('FOREGIN_OPTION_VALUE', '6');
+        }
+
+        hoSEForeginSheet.getRange(4, 1, hoSEForeginSheet.getRange('A:A').getLastRow(), 15).clear();
+
+        fetchHoSEForeginData();
+      } else {
+        userProperties.setProperty('IS_RUNNING_FOREGIN', 'false');
+        logSheet.appendRow([new Date().toLocaleString(), 'cancel crawl HoSE Foregin', 'done']);
+      }
+    }
+  } catch (error) {
+    console.log(error.message);
+    const logSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Log');
+    logSheet.appendRow([
+      new Date().toLocaleString(),
+      'start crawl HoSE Foregin error',
+      error.message,
+    ]);
+  }
+}
+
+function fetchHoSEForeginData() {
+  try {
+    const as = SpreadsheetApp.getActiveSpreadsheet();
+    const logSheet = as.getSheetByName('Log');
+    const systemSheet = as.getSheetByName('System');
+    const hoSEForeginSheet = as.getSheetByName('HoSE.ForeignInvestment');
+    var userProperties = PropertiesService.getUserProperties();
+
+    const titleInfo = checkTitleColumn();
+    if (titleInfo) {
+      logSheet.appendRow([new Date().toLocaleString(), 'get HoSE Foregin data', 'getting']);
+      var dates = JSON.parse(userProperties.getProperty('FOREGIN_DATES'));
+      console.log('dates fetch: ', dates);
+
+      if (dates) {
+        startOrResumeContinousExecutionInstance('fetchHoSEForeginData');
+
+        if (getBatchKey('fetchHoSEForeginData') === '') setBatchKey('fetchHoSEForeginData', 0);
+
+        var counter = Number(getBatchKey('fetchHoSEForeginData'));
+        for (let i = 0 + counter; i < dates?.length; i++) {
+          systemSheet
+            .getRange(2, titleInfo.crawlForeginProcessColumn.index)
+            .setValue(`${((i / dates?.length) * 100).toFixed(2)}%`);
+
+          const hoseForeginData = fetchHoSEForeginInvestment(dates[i]);
+          if (isTimeRunningOut('fetchHoSEForeginData')) {
+            return;
+          }
+          if (hoseForeginData) {
+            setBatchKey('fetchHoSEForeginData', i);
+            hoSEForeginSheet.appendRow(hoseForeginData);
+          } else {
+            i--;
+          }
+
+          if (Number(getBatchKey('fetchHoSEForeginData')) === dates?.length - 1) {
+            endContinuousExecutionHoSEForegin('fetchHoSEForeginData');
+            systemSheet.getRange(2, titleInfo.crawlForeginProcessColumn.index).setValue(`100%`);
+            logSheet.appendRow([new Date().toLocaleString(), 'get HoSE Foregin data', 'done']);
+          }
+        }
+      } else {
+        let today = new Date();
+        let yesterday = new Date(new Date().setDate(today.getDate() - 1));
+
+        let day = today.getDate() > 10 ? `${today.getDate()}` : `0${today.getDate()}`;
+        let month =
+          today.getMonth() + 1 > 10 ? `${today.getMonth() + 1}` : `0${today.getMonth() + 1}`;
+        let year = `${today.getFullYear()}`;
+
+        let yesterdayDay =
+          yesterday.getDate() > 10 ? `${yesterday.getDate()}` : `0${yesterday.getDate()}`;
+        let yesterdayMonth =
+          yesterday.getMonth() + 1 > 10
+            ? `${yesterday.getMonth() + 1}`
+            : `0${yesterday.getMonth() + 1}`;
+        let yesterdayYear = `${yesterday.getFullYear()}`;
+
+        const dayFetch = [
+          `${day}.${month}.${year}`,
+          `${yesterdayDay}.${yesterdayMonth}.${yesterdayYear}`,
+        ];
+        for (let i = 0; i < 2; i++) {
+          const hoseForeginData = fetchHoSEForeginInvestment(dayFetch[i]);
+          if (hoseForeginData) {
+            console.log('hoseForeginData auto: ', hoseForeginData);
+            if (i === 0) {
+              let dateCellValue = hoSEForeginSheet.getRange('A4').getValue();
+              if (isDate(dateCellValue)) {
+                dateCellValue = `${
+                  dateCellValue.getDate() < 10
+                    ? `0${dateCellValue.getDate()}`
+                    : dateCellValue.getDate()
+                }/${
+                  dateCellValue.getMonth() + 1 < 10
+                    ? `0${dateCellValue.getMonth() + 1}`
+                    : dateCellValue.getMonth() + 1
+                }/${dateCellValue.getFullYear()}`;
+              }
+              if (dateCellValue === hoseForeginData[0]) {
+                hoSEForeginSheet.getRange(4, 1, 1, 15).setValues([hoseForeginData]);
+              } else {
+                hoSEForeginSheet.insertRowBefore(4);
+                hoSEForeginSheet.getRange(4, 1, 1, 15).setValues([hoseForeginData]);
+              }
+            } else {
+              hoSEForeginSheet.getRange(5, 1, 1, 15).setValues([hoseForeginData]);
+            }
+          } else {
+            --i;
+          }
+        }
+        logSheet.appendRow([new Date().toLocaleString(), 'get HoSE Foregin data', 'done']);
+      }
+    }
+  } catch (error) {
+    console.log(error.message);
+    const logSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Log');
+    logSheet.appendRow([new Date().toLocaleString(), 'get HoSE Foregin data error', error.message]);
+  }
+}
+
+function fetchHoSEForeginInvestment(date) {
+  try {
+    let userProperties = PropertiesService.getUserProperties();
+    const optionValue = userProperties.getProperty('FOREGIN_OPTION_VALUE');
+    console.log('option value: ', optionValue);
+
+    let foreginVolumeResponse = UrlFetchApp.fetch(
+      `https://www.hsx.vn/Modules/Rsde/Report/ForeginTradingVolumeReport?pageFieldName1=Type&pageFieldValue1=${optionValue}&pageFieldOperator1=&pageFieldName2=DateFrom&pageFieldValue2=${date}&pageFieldOperator2=&pageFieldName3=DateTo&pageFieldValue3=${date}&pageFieldOperator3=&pageFieldName4=Symbol&pageFieldValue4=&pageFieldOperator4=&pageCriteriaLength=4&_search=false&nd=1677934639906&rows=30&page=1&sidx=id&sord=desc`,
+      {
+        headers: {
+          accept: 'application/json, text/javascript, */*; q=0.01',
+          'accept-language': 'vi-VN,vi;q=0.9,fr-FR;q=0.8,fr;q=0.7,en-US;q=0.6,en;q=0.5',
+          'sec-ch-ua': '"Chromium";v="110", "Not A(Brand";v="24", "Google Chrome";v="110"',
+          'sec-ch-ua-mobile': '?0',
+          'sec-ch-ua-platform': '"Windows"',
+          'sec-fetch-dest': 'empty',
+          'sec-fetch-mode': 'cors',
+          'sec-fetch-site': 'same-origin',
+          'x-requested-with': 'XMLHttpRequest',
+          cookie:
+            '_ga=GA1.2.1589264414.1676563808; ASP.NET_SessionId=gz0qae1pfttk1ily4glj3odu; TS016df111=01343ddb6a38b3eda20c59e1dc3419e7fa63349c9b3a9722c694264d354e3739f5c808c87257c80c91db7fd481dbecb68f62f2e79bd691c1c99c262ac6f83c94c8113c3ae1; _gid=GA1.2.1084885771.1677934216; TS0d710d04027=085cef26a9ab20002b117626e701bbffc06ba1214414ebf288796a4090115de05e4dd0caba7aa0e30884129f001130001fd5395511ab816c7329199cd4d5fa02afe025c05bdde427f27d9235941179e9781cfe3bb20d0ad2d11bd2858c5ffb06',
+          Referer:
+            'https://www.hsx.vn/Modules/Rsde/Report/ForeignTradingReportIndex?fid=4eade9cd9f9b472ebdc235a0d4a6407e',
+          'Referrer-Policy': 'strict-origin-when-cross-origin',
+        },
+        method: 'GET',
+      }
+    );
+    console.log(
+      'foreginVolumeResponse: ',
+      JSON.parse(foreginVolumeResponse.getResponseCode()),
+      ' -- date: ',
+      date
+    );
+    let foreginVolumeData = JSON.parse(foreginVolumeResponse.getContentText())?.rows;
+    console.log(foreginVolumeData);
+    let foreginVolumne = [];
+    foreginVolumeData?.forEach((item) => {
+      if (item?.id === 'Mua' || item?.id === 'Bán') {
+        foreginVolumne = [...foreginVolumne, ...item?.cell?.slice(1)];
+      } else {
+        foreginVolumne = [...foreginVolumne, item?.cell[1]];
+      }
+    });
+    console.log('foreginVolumne: ', foreginVolumne);
+
+    let foreginValueResponse = UrlFetchApp.fetch(
+      `https://www.hsx.vn/Modules/Rsde/Report/ForeginTradingValueReport?pageFieldName1=Type&pageFieldValue1=${optionValue}&pageFieldOperator1=&pageFieldName2=DateFrom&pageFieldValue2=${date}&pageFieldOperator2=&pageFieldName3=DateTo&pageFieldValue3=${date}&pageFieldOperator3=&pageFieldName4=Symbol&pageFieldValue4=&pageFieldOperator4=&pageCriteriaLength=4&_search=false&nd=1677934639912&rows=30&page=1&sidx=id&sord=desc`,
+      {
+        headers: {
+          accept: 'application/json, text/javascript, */*; q=0.01',
+          'accept-language': 'vi-VN,vi;q=0.9,fr-FR;q=0.8,fr;q=0.7,en-US;q=0.6,en;q=0.5',
+          'sec-ch-ua': '"Chromium";v="110", "Not A(Brand";v="24", "Google Chrome";v="110"',
+          'sec-ch-ua-mobile': '?0',
+          'sec-ch-ua-platform': '"Windows"',
+          'sec-fetch-dest': 'empty',
+          'sec-fetch-mode': 'cors',
+          'sec-fetch-site': 'same-origin',
+          'x-requested-with': 'XMLHttpRequest',
+          cookie:
+            '_ga=GA1.2.1589264414.1676563808; ASP.NET_SessionId=gz0qae1pfttk1ily4glj3odu; TS016df111=01343ddb6a38b3eda20c59e1dc3419e7fa63349c9b3a9722c694264d354e3739f5c808c87257c80c91db7fd481dbecb68f62f2e79bd691c1c99c262ac6f83c94c8113c3ae1; _gid=GA1.2.1084885771.1677934216; TS0d710d04027=085cef26a9ab20002b117626e701bbffc06ba1214414ebf288796a4090115de05e4dd0caba7aa0e30884129f001130001fd5395511ab816c7329199cd4d5fa02afe025c05bdde427f27d9235941179e9781cfe3bb20d0ad2d11bd2858c5ffb06',
+          Referer:
+            'https://www.hsx.vn/Modules/Rsde/Report/ForeignTradingReportIndex?fid=4eade9cd9f9b472ebdc235a0d4a6407e',
+          'Referrer-Policy': 'strict-origin-when-cross-origin',
+        },
+        method: 'GET',
+      }
+    );
+    console.log(
+      'foreginValueResponse: ',
+      JSON.parse(foreginValueResponse.getResponseCode()),
+      ' -- date: ',
+      date
+    );
+    let foreginValueData = JSON.parse(foreginValueResponse.getContentText())?.rows;
+    let foreginValue = [];
+    foreginValueData?.forEach((item) => {
+      if (item?.id === 'Mua' || item?.id === 'Bán') {
+        foreginValue = [...foreginValue, ...item?.cell?.slice(1)];
+      } else {
+        foreginValue = [...foreginValue, item?.cell[1]];
+      }
+    });
+    console.log('foreginValue: ', foreginValue);
+
+    const locale = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetLocale();
+    console.log('locale: ', locale);
+    for (let i = 0; i < foreginVolumne.length; i++) {
+      if (locale === 'vi_VN') {
+        foreginVolumne[i] = foreginVolumne[i]?.replaceAll('.', '');
+      } else if (locale?.includes('en')) {
+        foreginVolumne[i] = foreginVolumne[i]?.replaceAll('.', '').replaceAll(',', '.');
+      }
+    }
+
+    for (let i = 0; i < foreginValue.length; i++) {
+      if (locale === 'vi_VN') {
+        foreginValue[i] = foreginValue[i]?.replaceAll('.', '');
+      } else if (locale?.includes('en')) {
+        foreginValue[i] = foreginValue[i]?.replaceAll('.', '').replaceAll(',', '.');
+      }
+    }
+
+    let result = [date?.replaceAll('.', '/'), ...foreginVolumne, ...foreginValue];
+    return result;
+  } catch (error) {
+    console.log('fetch HoSE Foregin error: ', error.message);
+    console.log('res error -- date: ', date);
+    if (error.message?.includes('Timeout')) {
+      fetchHoSEForeginInvestment(date);
+    }
+  }
+}
+
+/**
+ * ======================= Create trigger to fetch HoSE Foregin eveday =======================
+ */
+function makeAutoFetchHoSEForeginTrigger() {
+  try {
+    var systemSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('System');
+    var userProperties = PropertiesService.getUserProperties();
+
+    const titleInfo = checkTitleColumn();
+    if (titleInfo) {
+      var hourNumber = systemSheet
+        .getRange(2, titleInfo.autoTimeCrawlForeginColumn.index)
+        .getValue();
+      console.log('hourNumber: ', hourNumber);
+      if (hourNumber < 1 || hourNumber > 24) {
+        const logSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Log');
+        logSheet.appendRow([new Date().toLocaleString(), 'hour number error', 'input error']);
+        return;
+      }
+
+      var triggerId = userProperties.getProperty('AUTO_FETCH_HOSE_FOREGIN_TRIGGER');
+      if (triggerId) {
+        var triggers = ScriptApp.getProjectTriggers();
+        for (let i = 0; i < triggers.length; i++) {
+          if (triggers[i].getUniqueId() === triggerId) {
+            ScriptApp.deleteTrigger(triggers[i]);
+            break;
+          }
+        }
+      }
+      var trigger = ScriptApp.newTrigger('fetchHoSEForeginData')
+        .timeBased()
+        .atHour(parseInt(hourNumber))
+        .everyDays(1)
+        .create();
+      userProperties.setProperty('AUTO_FETCH_HOSE_FOREGIN_TRIGGER', trigger.getUniqueId());
+    }
+  } catch (error) {
+    console.log(error.message);
+    const logSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Log');
+    logSheet.appendRow([
+      new Date().toLocaleString(),
+      'make auto fetch HoSE Foregin data error',
+      error.message,
+    ]);
+  }
+}
+
+/**
+ * ======================= Stop program =======================
+ */
+function stopProgram() {
+  try {
+    const logSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Log');
+    logSheet.appendRow([new Date().toLocaleString(), 'stop program', 'stopping']);
+
+    var userProperties = PropertiesService.getUserProperties();
+
+    userProperties.setProperty('IS_STOP_PROGRAM', 'true');
+
+    var isFetchStockHistoryRunning = userProperties.getProperty('IS_RUNNING');
+    var isFetchHoSEForeginRunning = userProperties.getProperty('IS_RUNNING_FOREGIN');
+
+    if (isFetchStockHistoryRunning === 'true') {
+      endContinuousExecutionInstance('getStockHistoryData');
+      endCrawlStockHistoryData();
+    }
+    if (isFetchHoSEForeginRunning === 'true') {
+      endContinuousExecutionHoSEForegin('fetchHoSEForeginData');
+    }
+    endContinuousExecutionInstance('crawlUpdateStockHistory');
+    endContinuousExecutionInstance('deleteOldData');
+    userProperties.setProperty('IS_STOP_PROGRAM', 'false');
+    logSheet.appendRow([new Date().toLocaleString(), 'stop program', 'stopped']);
+  } catch (error) {
+    console.log(error.message);
+    const logSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Log');
+    logSheet.appendRow([new Date().toLocaleString(), 'stop program error', error.message]);
+  }
+}
+
+/**
+ * ======================= Validate =======================
+ */
+function validateEmail(email) {
+  const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return re.test(email);
+}
+
+function validateDate(dateString) {
+  if (!/^\d{4}\/\d{1,2}\/\d{1,2}$/.test(dateString)) {
+    if (!/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(dateString)) {
+      return false;
+    }
+  }
+  if (isNaN(new Date(dateString).getDate())) {
+    return false;
+  }
+  return true;
+}
+
+function isDate(value) {
+  return value instanceof Date;
+}
+
+/**
+ * ======================= Clear cache =======================
+ */
+function clearCache() {
+  try {
+    const scriptProperties = PropertiesService.getScriptProperties();
+    scriptProperties.deleteAllProperties();
+
+    const userProperties = PropertiesService.getUserProperties();
+    userProperties.deleteAllProperties();
+
+    var triggers = ScriptApp.getProjectTriggers();
+    for (var i in triggers) {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  } catch (err) {
+    console.log('Failed with error %s', err.message);
+  }
+}
+
+/**
+ * ======================= Debugger =======================
+ */
+function debugFunc() {
+  try {
+    const userProperties = PropertiesService.getUserProperties();
+    const scriptProperties = PropertiesService.getScriptProperties();
+
+    const userData = userProperties.getProperties();
+    for (const key in userData) {
+      console.log('User Key: %s, Value: %s', key, userData[key]);
+    }
+
+    const scriptData = scriptProperties.getProperties();
+    for (const key in scriptData) {
+      console.log('Script Key: %s, Value: %s', key, scriptData[key]);
+    }
+
+    var triggers = ScriptApp.getProjectTriggers();
+    for (var i in triggers) {
+      console.log(`triggers ${i} ${triggers[i].getUniqueId()}`);
+    }
+
+    const as = SpreadsheetApp.getActiveSpreadsheet();
+  } catch (err) {
+    console.log('error: ', err.message);
+  }
+}
+
+/**
+ * ======================= Handle continue function =======================
+ */
+function setBatchKey(fname, key) {
+  var userProperties = PropertiesService.getUserProperties();
+  userProperties.setProperty('GASCBL_' + fname + '_KEY', key);
+}
+
+function getBatchKey(fname) {
+  var userProperties = PropertiesService.getUserProperties();
+  return userProperties.getProperty('GASCBL_' + fname + '_KEY');
+}
+
+function startOrResumeContinousExecutionInstance(fname) {
+  console.log('start trigger: ', fname);
+  var userProperties = PropertiesService.getUserProperties();
+  var start = userProperties.getProperty('GASCBL_' + fname + '_START_BATCH');
+  if (start === '' || start === null) {
+    start = new Date().toLocaleString();
+    userProperties.setProperty('GASCBL_' + fname + '_START_BATCH', start);
+    userProperties.setProperty('GASCBL_' + fname + '_KEY', '');
+  }
+
+  userProperties.setProperty('GASCBL_' + fname + '_START_ITERATION', new Date());
+
+  deleteCurrentTrigger_(fname);
+  enableNextTrigger_(fname, 6 * 60 * 1000 + 3000);
+}
+
+function deleteCurrentTrigger_(fname) {
+  var userProperties = PropertiesService.getUserProperties();
+  var triggerId = userProperties.getProperty('GASCBL_' + fname);
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i in triggers) {
+    if (triggers[i].getUniqueId() === triggerId) ScriptApp.deleteTrigger(triggers[i]);
+  }
+  userProperties.setProperty('GASCBL_' + fname, '');
+}
+
+function enableNextTrigger_(fname, afterTime) {
+  var userProperties = PropertiesService.getUserProperties();
+  var nextTrigger = ScriptApp.newTrigger(fname).timeBased().after(afterTime).create();
+  var triggerId = nextTrigger.getUniqueId();
+
+  userProperties.setProperty('GASCBL_' + fname, triggerId);
+}
+
+function endContinuousExecutionInstance(fname) {
+  try {
+    console.log('end trigger: ', fname);
+    var userProperties = PropertiesService.getUserProperties();
+
+    deleteCurrentTrigger_(fname);
+    userProperties.deleteProperty('GASCBL_' + fname + '_START_ITERATION');
+    userProperties.deleteProperty('GASCBL_' + fname + '_START_BATCH');
+    userProperties.deleteProperty('GASCBL_' + fname + '_KEY');
+    userProperties.deleteProperty('GASCBL_' + fname);
+  } catch (error) {
+    console.log(error.message);
+    const logSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Log');
+    logSheet.appendRow([
+      new Date().toLocaleString(),
+      'endContinuousExecutionInstance error',
+      error.message,
+    ]);
+  }
+}
+
+function isTimeRunningOut(fname) {
+  var userProperties = PropertiesService.getUserProperties();
+  var start = new Date(userProperties.getProperty('GASCBL_' + fname + '_START_ITERATION'));
+  var now = new Date();
+
+  var timeElapsed = Math.floor((now.getTime() - start.getTime()) / 1000);
+  return timeElapsed > 300;
+}
+
+function endContinuousExecutionHoSEForegin(fname) {
+  console.log('end trigger: ', fname);
+  var userProperties = PropertiesService.getUserProperties();
+
+  deleteCurrentTrigger_(fname);
+  userProperties.deleteProperty('GASCBL_' + fname + '_START_ITERATION');
+  userProperties.deleteProperty('GASCBL_' + fname + '_START_BATCH');
+  userProperties.deleteProperty('GASCBL_' + fname + '_KEY');
+  userProperties.deleteProperty('GASCBL_' + fname);
+  userProperties.deleteProperty('FOREGIN_DATES');
+  userProperties.setProperty('IS_RUNNING_FOREGIN', 'false');
+}
